@@ -249,50 +249,57 @@ def put(local, remote):
     # Use the local filename if no remote filename is provided.
     if remote is None:
         remote = os.path.basename(os.path.abspath(local))
-    # Check if path is a folder and do recursive copy of everything inside it.
-    # Otherwise it's a file and should simply be copied over.
+
+    board_files = files.Files(_board)
+
     if os.path.isdir(local):
-        # Create progress bar for each file
-        pb_bath =  MultiProgressBar('Overall progress')
+        # Handle directory upload
+        pb_bath = MultiProgressBar('Overall progress')
         for parent, child_dirs, child_files in os.walk(local, followlinks=True):
             for filename in child_files:
                 path = os.path.join(parent, filename)
                 size = os.stat(path).st_size
-                pb_bath.add_subjob(PorgressBar(name=path,total=size ))
+                pb_bath.add_subjob(ProgressBar(name=path, total=size))
 
-        # Directory copy, create the directory and walk all children to copy
-        # over the files.
-        board_files = files.Files(_board)
+        # Upload files in directory
         for parent, child_dirs, child_files in os.walk(local, followlinks=True):
-            # Create board filesystem absolute path to parent directory.
-            remote_parent = posixpath.normpath(
-                posixpath.join(remote, os.path.relpath(parent, local))
-            )
+            remote_parent = posixpath.normpath(posixpath.join(remote, os.path.relpath(parent, local)))
             try:
-                # Create remote parent directory.
                 board_files.mkdir(remote_parent)
             except files.DirectoryExistsError:
-                # Ignore errors for directories that already exist.
-                pass
-            
-            # Loop through all the files and put them on the board too.
+                pass  # Ignore if the directory already exists
+
             for filename in child_files:
                 local_path = os.path.join(parent, filename)
                 with open(local_path, "rb") as infile:
-                    remote_filename = posixpath.join(remote_parent, filename)
                     data = infile.read()
-                    job = pb_bath.get_subjob(local_path)
-                    callback = job.on_progress_done
-                    board_files.put(remote_filename, data, callback)
+                    remote_filename = posixpath.join(remote_parent, filename)
+
+                    # Update progress for file upload
+                    progress = pb_bath.get_subjob(local_path)
+                    board_files.put(remote_filename, data)
+                    progress.finish()  # Complete progress for the file
+
     else:
-        # File copy, open the file and copy its contents to the board.
-        # Put the file on the board.
+        # Handle single file upload
         with open(local, "rb") as infile:
             data = infile.read()
             progress = ProgressBar(name=local, total=len(data))
-            board_files = files.Files(_board)
-            board_files.put(remote, data, progress.on_progress_done)
-    print('')
+            progress.start()  # Start progress
+
+            # Upload file in chunks to update progress
+            remote_file_data = bytearray()
+            chunk_size = 1024  # Read in 1 KB chunks
+            for i in range(0, len(data), chunk_size):
+                chunk = data[i:i + chunk_size]
+                remote_file_data.extend(chunk)
+                board_files.put(remote, chunk)
+                progress.update(len(chunk))  # Update progress
+
+            progress.finish()  # Complete progress for the file
+
+    print('Upload complete!')
+
 
 @cli.command()
 @click.argument("remote_file")
@@ -311,6 +318,7 @@ def rm(remote_file):
     # Delete the provided file/directory on the board.
     board_files = files.Files(_board)
     board_files.rm(remote_file)
+    print("file removed")
 
 
 @cli.command()
