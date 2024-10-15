@@ -25,6 +25,7 @@ import platform
 import posixpath
 import re
 import serial.serialutil
+from tqdm import tqdm
 
 import click
 import dotenv
@@ -253,15 +254,6 @@ def put(local, remote):
     board_files = files.Files(_board)
 
     if os.path.isdir(local):
-        # Handle directory upload
-        pb_bath = MultiProgressBar('Overall progress')
-        for parent, child_dirs, child_files in os.walk(local, followlinks=True):
-            for filename in child_files:
-                path = os.path.join(parent, filename)
-                size = os.stat(path).st_size
-                pb_bath.add_subjob(ProgressBar(name=path, total=size))
-
-        # Upload files in directory
         for parent, child_dirs, child_files in os.walk(local, followlinks=True):
             remote_parent = posixpath.normpath(posixpath.join(remote, os.path.relpath(parent, local)))
             try:
@@ -274,51 +266,86 @@ def put(local, remote):
                 with open(local_path, "rb") as infile:
                     data = infile.read()
                     remote_filename = posixpath.join(remote_parent, filename)
+                    chunk_size = 1024
+                    total_size = len(data)
 
-                    # Update progress for file upload
-                    progress = pb_bath.get_subjob(local_path)
-                    board_files.put(remote_filename, data)
-                    progress.finish()  # Complete progress for the file
+                    print(f"Uploading {remote_filename}...")
+                    with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
+                        for i in range(0, total_size, chunk_size):
+                            chunk = data[i:i + chunk_size]
+                            board_files.put(remote_filename, chunk)
+                            progress.update(len(chunk))
+                    print("Upload complete!")
 
     else:
-        # Handle single file upload
         with open(local, "rb") as infile:
             data = infile.read()
-            progress = ProgressBar(name=local, total=len(data))
-            progress.start()  # Start progress
+            chunk_size = 1024
+            total_size = len(data)
 
-            # Upload file in chunks to update progress
-            remote_file_data = bytearray()
-            chunk_size = 1024  # Read in 1 KB chunks
-            for i in range(0, len(data), chunk_size):
-                chunk = data[i:i + chunk_size]
-                remote_file_data.extend(chunk)
-                board_files.put(remote, chunk)
-                progress.update(len(chunk))  # Update progress
-
-            progress.finish()  # Complete progress for the file
-
-    print('Upload complete!')
+            print(f"Uploading {remote}...")
+            with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
+                for i in range(0, total_size, chunk_size):
+                    chunk = data[i:i + chunk_size]
+                    board_files.put(remote, chunk)
+                    progress.update(len(chunk))
+            print("Upload complete!")
 
 
 @cli.command()
 @click.argument("remote_file")
-def rm(remote_file):
-    """Remove a file from the board.
-
-    Remove the specified file from the board's filesystem.  Must specify one
-    argument which is the path to the file to delete.  Note that this can't
-    delete directories which have files inside them, but can delete empty
-    directories.
-
-    For example to delete main.py from the root of a board run:
-
-      ampy --port /board/serial/port rm main.py
+@click.option(
+    "--recursive", "-r", is_flag=True, help="Recursively remove files and directories."
+)
+@click.option(
+    "--missing-okay", is_flag=True, help="Ignore if the directory does not exist."
+)
+def rm(remote_file, recursive, missing_okay):
     """
-    # Delete the provided file/directory on the board.
+    Remove a file or directory from the board.
+    
+    Use the --recursive option to delete a directory and its contents.
+    """
+    # Initialize the board file system
     board_files = files.Files(_board)
-    board_files.rm(remote_file)
-    print("file removed")
+
+    # Function to remove a single file or directory
+    def remove_single(path):
+        try:
+            board_files.rm(path)
+            print(f"Removed: {path}")
+        except Exception as e:
+            print(f"Error removing {path}: {e}")
+
+    if recursive:
+        # Recursively delete files and directories
+        try:
+            # List all files in the directory
+            files_to_delete = list(board_files.listdir(remote_file))
+            total_files = len(files_to_delete)
+            
+            # Initialize the progress bar
+            with tqdm(total=total_files, unit="file") as progress:
+                for file in files_to_delete:
+                    full_path = posixpath.join(remote_file, file)
+                    remove_single(full_path)
+                    progress.update(1)
+            print(f"Directory '{remote_file}' and its contents removed successfully!")
+        except Exception as e:
+            if missing_okay:
+                print(f"Directory '{remote_file}' does not exist, skipping.")
+            else:
+                print(f"Failed to remove directory: {e}")
+    else:
+        # Remove a single file
+        try:
+            remove_single(remote_file)
+        except Exception as e:
+            if missing_okay:
+                print(f"File '{remote_file}' does not exist, skipping.")
+            else:
+                print(f"Failed to remove file: {e}")
+
 
 
 @cli.command()
