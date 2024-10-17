@@ -152,11 +152,11 @@ def mkdir(directory, exists_okay, make_parents):
     By default you cannot recursively create a hierarchy of directories with one
     mkdir command. You may create each parent directory with separate
     mkdir command calls, or use the --make-parents option.
-    
+
     For example to make a directory under the root called 'code':
 
       ampy --port /board/serial/port mkdir /code
-      
+
     To make a directory under the root called 'code/for/ampy', along with all
     missing parents:
 
@@ -294,58 +294,22 @@ def put(local, remote):
 
 @cli.command()
 @click.argument("remote_file")
-@click.option(
-    "--recursive", "-r", is_flag=True, help="Recursively remove files and directories."
-)
-@click.option(
-    "--missing-okay", is_flag=True, help="Ignore if the directory does not exist."
-)
-def rm(remote_file, recursive, missing_okay):
+def rm(remote_file):
+    """Remove a file from the board.
+
+    Remove the specified file from the board's filesystem.  Must specify one
+    argument which is the path to the file to delete.  Note that this can't
+    delete directories which have files inside them, but can delete empty
+    directories.
+
+    For example to delete main.py from the root of a board run:
+
+      ampy --port /board/serial/port rm main.py
     """
-    Remove a file or directory from the board.
-    
-    Use the --recursive option to delete a directory and its contents.
-    """
-    # Initialize the board file system
+    # Delete the provided file/directory on the board.
     board_files = files.Files(_board)
-
-    # Function to remove a single file or directory
-    def remove_single(path):
-        try:
-            board_files.rm(path)
-            print(f"Removed: {path}")
-        except Exception as e:
-            print(f"Error removing {path}: {e}")
-
-    if recursive:
-        # Recursively delete files and directories
-        try:
-            # List all files in the directory
-            files_to_delete = list(board_files.listdir(remote_file))
-            total_files = len(files_to_delete)
-            
-            # Initialize the progress bar
-            with tqdm(total=total_files, unit="file") as progress:
-                for file in files_to_delete:
-                    full_path = posixpath.join(remote_file, file)
-                    remove_single(full_path)
-                    progress.update(1)
-            print(f"Directory '{remote_file}' and its contents removed successfully!")
-        except Exception as e:
-            if missing_okay:
-                print(f"Directory '{remote_file}' does not exist, skipping.")
-            else:
-                print(f"Failed to remove directory: {e}")
-    else:
-        # Remove a single file
-        try:
-            remove_single(remote_file)
-        except Exception as e:
-            if missing_okay:
-                print(f"File '{remote_file}' does not exist, skipping.")
-            else:
-                print(f"Failed to remove file: {e}")
-
+    board_files.rm(remote_file)
+    print("file removed")
 
 
 @cli.command()
