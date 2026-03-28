@@ -217,41 +217,24 @@ def ls(directory, long_format, recursive):
 @click.argument("local", type=click.Path(exists=True))
 @click.argument("remote", required=False)
 def put(local, remote):
-    """Put a file or folder and its contents on the board.
-
-    Put will upload a local file or folder  to the board.  If the file already
-    exists on the board it will be overwritten with no warning!  You must pass
-    at least one argument which is the path to the local file/folder to
-    upload.  If the item to upload is a folder then it will be copied to the
-    board recursively with its entire child structure.  You can pass a second
-    optional argument which is the path and name of the file/folder to put to
-    on the connected board.
-
-    For example to upload a main.py from the current directory to the board's
-    root run:
-
-      ampy --port /board/serial/port put main.py
-
-    Or to upload a board_boot.py from a ./foo subdirectory and save it as boot.py
-    in the board's root run:
-
-      ampy --port /board/serial/port put ./foo/board_boot.py boot.py
-
-    To upload a local folder adafruit_library and all of its child files/folders
-    as an item under the board's root run:
-
-      ampy --port /board/serial/port put adafruit_library
-
-    Or to put a local folder adafruit_library on the board under the path
-    /lib/adafruit_library on the board run:
-
-      ampy --port /board/serial/port put adafruit_library /lib/adafruit_library
-    """
-    # Use the local filename if no remote filename is provided.
+    """Put a file or folder and its contents on the board."""
     if remote is None:
         remote = os.path.basename(os.path.abspath(local))
 
     board_files = files.Files(_board)
+
+    def upload_file(local_path, remote_path):
+        with open(local_path, "rb") as infile:
+            data = infile.read()
+            total_size = len(data)
+            print(f"Uploading {remote_path}...")
+            with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
+                def progress_cb(n):
+                    progress.update(n)
+                board_files.put(remote_path, data, progress_cb)
+            
+            progress.close()  # ensure tqdm finishes
+            print(f"✔ Upload complete ({total_size} bytes)")
 
     if os.path.isdir(local):
         for parent, child_dirs, child_files in os.walk(local, followlinks=True):
@@ -265,35 +248,10 @@ def put(local, remote):
 
             for filename in child_files:
                 local_path = os.path.join(parent, filename)
-                with open(local_path, "rb") as infile:
-                    data = infile.read()
-                    remote_filename = posixpath.join(remote_parent, filename)
-                    total_size = len(data)
-
-                    print(f"Uploading {remote_filename}...")
-                    # with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
-
-                    #     def progress_cb(n):
-                    #         progress.update(n)
-
-                    #     board_files.put(remote_filename, data, progress_cb)
-
-                    # print("Upload complete!")
-
+                remote_filename = posixpath.join(remote_parent, filename)
+                upload_file(local_path, remote_filename)
     else:
-        with open(local, "rb") as infile:
-            data = infile.read()
-            total_size = len(data)
-
-            print(f"Uploading {remote}...")
-            with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
-
-                def progress_cb(n):
-                    progress.update(n)
-
-                board_files.put(remote, data, progress_cb)
-
-            print("Upload complete!")
+        upload_file(local, remote)
 
 
 @cli.command()

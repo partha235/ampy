@@ -282,7 +282,7 @@ class Files(object):
 
         self._pyboard.exit_raw_repl()
 
-        print(f"\n✔ Upload complete ({len(data)} bytes)")
+        # print(f"\n✔ Upload complete ({len(data)} bytes)")
 
 
     def rm(self, filename):
