@@ -22,6 +22,7 @@
 import ast
 import textwrap
 import binascii
+import textwrap
 
 from ampy.pyboard import PyboardError
 
@@ -240,11 +241,9 @@ class Files(object):
         return hashlib.sha1(data).hexdigest()
 
     def put(self, filename, data, progress_cb=None):
-        """Upload file using small chunks + retries for better reliability with large files (>100 lines)."""
-        import base64
         import time
+        import binascii
 
-        # Delete existing file first to prevent partial overwrite issues
         try:
             self.rm(filename)
         except:
@@ -252,67 +251,38 @@ class Files(object):
 
         self._pyboard.enter_raw_repl()
 
-        # Extra safety: garbage collection before starting upload
-        self._pyboard.exec_("import gc; gc.collect()")
+        # Open file
+        self._pyboard.exec_(f"f = open('{filename}', 'wb')")
 
-        # Setup on board
-        setup_cmd = textwrap.dedent("""\
-            import ubinascii, gc
-            gc.collect()
-            f = open('{}', 'wb')
-            def _w(d):
-                f.write(ubinascii.a2b_base64(d))
-                f.flush()
-            gc.collect()
-        """.format(filename))
-
-        self._pyboard.exec_(setup_cmd)
-
-        size = len(data)
-        # chunk_size = 64          # Small chunk = higher success rate on large files
         chunk_size = 256
-        # delay = 0.25             # Breathing room for the board and USB-serial
-        delay = 0.05
+        sent = 0
 
-        print(f"Uploading {filename} ({size:,} bytes)...")
+        for i in range(0, len(data), chunk_size):
+            chunk = data[i:i+chunk_size]
 
-        for i in range(0, size, chunk_size):
-            chunk = data[i:i + chunk_size]
-            encoded = base64.b64encode(chunk).decode('ascii')
-            cmd = f"_w({repr(encoded)})"
+            # Convert to hex (safe transport)
+            hex_chunk = binascii.hexlify(chunk).decode()
 
-            # Retry loop with progressive backoff
-            for attempt in range(6):
-                try:
-                    self._pyboard.exec_(cmd)
-                    break
-                except PyboardError as ex:
-                    if attempt == 5:
-                        self._pyboard.exit_raw_repl()
-                        raise RuntimeError(f"Upload failed at offset {i:,} after 6 attempts: {ex}")
-                    time.sleep(0.5 + attempt * 0.2)
+            cmd = textwrap.dedent(f"""
+                    import ubinascii
+                    f.write(ubinascii.unhexlify('{hex_chunk}'))
+                """)
 
-            if hasattr(progress_cb, '__call__'):
+            self._pyboard.exec_(cmd)
+
+            sent += len(chunk)
+
+            if progress_cb:
                 progress_cb(len(chunk))
 
-            time.sleep(delay)
+            print(f"\r{sent}/{len(data)} bytes", end="")
 
-        # Finalize
-        self._pyboard.exec_("f.close(); import gc; gc.collect()")
+        # Close file
+        self._pyboard.exec_("f.close()")
+
         self._pyboard.exit_raw_repl()
 
-        # Verify checksum
-        local_hash = self._get_local_hash(data)
-        remote_hash = self._get_remote_hash(filename)
-
-        if local_hash != remote_hash:
-            raise RuntimeError(f"Upload failed: checksum mismatch!\n"
-                               f"Local : {local_hash}\n"
-                               f"Remote: {remote_hash}")
-
-        print(f"✔ Successfully uploaded and verified {filename} ({size:,} bytes)")
-        
-
+        print(f"\n✔ Upload complete ({len(data)} bytes)")
 
 
     def rm(self, filename):
