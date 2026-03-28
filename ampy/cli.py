@@ -271,14 +271,14 @@ def put(local, remote):
                     total_size = len(data)
 
                     print(f"Uploading {remote_filename}...")
-                    with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
+                    # with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
 
-                        def progress_cb(n):
-                            progress.update(n)
+                    #     def progress_cb(n):
+                    #         progress.update(n)
 
-                        board_files.put(remote_filename, data, progress_cb)
+                    #     board_files.put(remote_filename, data, progress_cb)
 
-                    print("Upload complete!")
+                    # print("Upload complete!")
 
     else:
         with open(local, "rb") as infile:
