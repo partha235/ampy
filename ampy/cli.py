@@ -255,7 +255,9 @@ def put(local, remote):
 
     if os.path.isdir(local):
         for parent, child_dirs, child_files in os.walk(local, followlinks=True):
-            remote_parent = posixpath.normpath(posixpath.join(remote, os.path.relpath(parent, local)))
+            remote_parent = posixpath.normpath(
+                posixpath.join(remote, os.path.relpath(parent, local))
+            )
             try:
                 board_files.mkdir(remote_parent)
             except files.DirectoryExistsError:
@@ -266,29 +268,31 @@ def put(local, remote):
                 with open(local_path, "rb") as infile:
                     data = infile.read()
                     remote_filename = posixpath.join(remote_parent, filename)
-                    chunk_size = 1024
                     total_size = len(data)
 
                     print(f"Uploading {remote_filename}...")
                     with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
-                        for i in range(0, total_size, chunk_size):
-                            chunk = data[i:i + chunk_size]
-                            board_files.put(remote_filename, chunk)
-                            progress.update(len(chunk))
+
+                        def progress_cb(n):
+                            progress.update(n)
+
+                        board_files.put(remote_filename, data, progress_cb)
+
                     print("Upload complete!")
 
     else:
         with open(local, "rb") as infile:
             data = infile.read()
-            chunk_size = 1024
             total_size = len(data)
 
             print(f"Uploading {remote}...")
             with tqdm(total=total_size, unit="B", unit_scale=True) as progress:
-                for i in range(0, total_size, chunk_size):
-                    chunk = data[i:i + chunk_size]
-                    board_files.put(remote, chunk)
-                    progress.update(len(chunk))
+
+                def progress_cb(n):
+                    progress.update(n)
+
+                board_files.put(remote, data, progress_cb)
+
             print("Upload complete!")
 
 
