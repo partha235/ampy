@@ -209,27 +209,82 @@ class Files(object):
                 raise ex
         self._pyboard.exit_raw_repl()
 
-    def put(self, filename, data, progress_cb=None):
-        """Create or update the specified file with the provided data.
-        """
-        # Open the file for writing on the board and write chunks of data.
-        self._pyboard.enter_raw_repl()
-        self._pyboard.exec_("f = open('{0}', 'wb')".format(filename))
-        size = len(data)
-        # Loop through and write a buffer size chunk of data at a time.
-        for i in range(0, size, BUFFER_SIZE):
-            chunk_size = min(BUFFER_SIZE, size - i)
-            chunk = repr(data[i : i + chunk_size])
-            # Make sure to send explicit byte strings (handles python 2 compatibility).
-            if not chunk.startswith("b"):
-                chunk = "b" + chunk
-            self._pyboard.exec_("f.write({0})".format(chunk))
-            # notify caller how much has already been written
-            if hasattr(progress_cb, '__call__'):
-                progress_cb(chunk_size)
 
+    def _get_remote_hash(self, filename):
+        import textwrap
+
+        command = """
+    import ubinascii
+    import hashlib
+
+    h = hashlib.sha1()
+    with open('{0}', 'rb') as f:
+        while True:
+            d = f.read(256)
+            if not d:
+                break
+            h.update(d)
+
+    print(ubinascii.hexlify(h.digest()).decode())
+    """.format(filename)
+
+        self._pyboard.enter_raw_repl()
+        out = self._pyboard.exec_(textwrap.dedent(command))
+        self._pyboard.exit_raw_repl()
+
+        return out.strip().decode()
+
+    def _get_local_hash(self, data):
+        import hashlib
+        return hashlib.sha1(data).hexdigest()
+
+
+
+
+    def put(self, filename, data, progress_cb=None):
+        import base64
+        import time
+
+        self._pyboard.enter_raw_repl()
+
+        setup_cmd = """\
+        import ubinascii
+        f = open('{0}', 'wb')
+        def _w(d):
+            f.write(ubinascii.a2b_base64(d))
+            f.flush()
+        """.format(filename)
+
+        self._pyboard.exec_(setup_cmd)
+
+        size = len(data)
+        chunk_size = 512
+
+        for i in range(0, size, chunk_size):
+            chunk = data[i:i+chunk_size]
+            encoded = base64.b64encode(chunk).decode()
+
+            self._pyboard.exec_("_w('{}')".format(encoded))
+
+            if hasattr(progress_cb, '__call__'):
+                progress_cb(len(chunk))
+
+            time.sleep(0.01)
+
+        # ✅ CLOSE + EXIT
         self._pyboard.exec_("f.close()")
         self._pyboard.exit_raw_repl()
+
+        # ✅ VERIFY
+        local_hash = self._get_local_hash(data)
+        remote_hash = self._get_remote_hash(filename)
+
+        if local_hash != remote_hash:
+            raise RuntimeError("Upload failed: checksum mismatch!")
+
+        
+
+
 
     def rm(self, filename):
         """Remove the specified file or directory."""
